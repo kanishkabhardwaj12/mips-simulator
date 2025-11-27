@@ -18,43 +18,44 @@ const DATA_START = 0x10010000;
 const STACK_START = 0x7FFFFFFC;
 const TEXT_START = 0x00400000;
 
-// Default code updated to the user's subtraction example
+// Updated Default Code to the User's Array Sum Example
 const DEFAULT_CODE = `.data
-msg1: .asciiz "Enter first number: "
-msg2: .asciiz "Enter second number: "
-res:  .asciiz "Difference = "
+array:  .word 10, 20, 30, 40, 50     # The array elements
+n:      .word 5                      # Number of elements
+msg:    .asciiz "Sum of array = "
 
 .text
 main:
-    # Ask for first number
+    # Load base address of array
+    la $t0, array        # $t0 = address of array[0]
+
+    # Load count
+    lw $t1, n            # $t1 = n = 5
+
+    # Initialize sum = 0
+    addi $t2, $zero, 0   # $t2 = sum
+
+    # Initialize index i = 0
+    addi $t3, $zero, 0   # $t3 = i
+
+loop:
+    beq $t3, $t1, done   # if i == n -> break
+
+    lw $t4, 0($t0)       # load array[i] into $t4
+    add $t2, $t2, $t4    # sum += array[i]
+
+    addi $t0, $t0, 4     # move to next element (address +4)
+    addi $t3, $t3, 1     # i++
+
+    j loop
+
+done:
+    # Print message
     li $v0, 4
-    la $a0, msg1
+    la $a0, msg
     syscall
 
-    # Read first integer
-    li $v0, 5
-    syscall
-    move $t0, $v0
-
-    # Ask for second number
-    li $v0, 4
-    la $a0, msg2
-    syscall
-
-    # Read second integer
-    li $v0, 5
-    syscall
-    move $t1, $v0
-
-    # Subtract: t2 = t0 - t1
-    sub $t2, $t0, $t1
-
-    # Print result label
-    li $v0, 4
-    la $a0, res
-    syscall
-
-    # Print difference
+    # Print sum
     li $v0, 1
     move $a0, $t2
     syscall
@@ -168,7 +169,7 @@ const useMipsSimulator = () => {
         if (!line) continue; // Just a label on this line
 
         if (currentSection === '.data') {
-          // Very basic data parser
+          // Data Parser
           const tokens = line.match(/\S+|"[^"]*"/g) || [];
           const directive = tokens[0];
           
@@ -180,12 +181,20 @@ const useMipsSimulator = () => {
             }
             if (directive === '.asciiz') newDataSegment[dataPtr++] = 0;
           } else if (directive === '.word') {
-            const val = parseInt(tokens[1]);
-            newDataSegment[dataPtr] = (val >> 24) & 0xFF;
-            newDataSegment[dataPtr+1] = (val >> 16) & 0xFF;
-            newDataSegment[dataPtr+2] = (val >> 8) & 0xFF;
-            newDataSegment[dataPtr+3] = val & 0xFF;
-            dataPtr += 4;
+            // Updated to handle comma separated list: .word 10, 20, 30
+            // Remove the directive and split by comma
+            const rawArgs = line.replace(directive, '').split(',');
+            
+            rawArgs.forEach(arg => {
+                const val = parseInt(arg.trim());
+                if (!isNaN(val)) {
+                    newDataSegment[dataPtr] = (val >> 24) & 0xFF;
+                    newDataSegment[dataPtr+1] = (val >> 16) & 0xFF;
+                    newDataSegment[dataPtr+2] = (val >> 8) & 0xFF;
+                    newDataSegment[dataPtr+3] = val & 0xFF;
+                    dataPtr += 4;
+                }
+            });
           }
         } else {
           // Text section
@@ -237,13 +246,15 @@ const useMipsSimulator = () => {
 
       // Helper to parse register strings like '$t0' or '0($t1)'
       const parseReg = (str) => {
-        if (!str) return 0;
+        if (!str) return null;
         // Handle offset format 0($t1)
         if (str.includes('(')) {
           const match = str.match(/(-?\d+)\((\$[a-z0-9]+)\)/);
           if (match) return { offset: parseInt(match[1]), reg: REG_MAP[match[2]] };
         }
-        return REG_MAP[str];
+        // Handle simple register
+        if (REG_MAP.hasOwnProperty(str)) return REG_MAP[str];
+        return null;
       };
 
       const getRegVal = (rIdx) => (rIdx === 0 ? 0 : nextRegs[rIdx]); // $zero is always 0
@@ -304,32 +315,55 @@ const useMipsSimulator = () => {
            nextRegs[parseReg(args[0])] = getRegVal(parseReg(args[1]));
            break;
         
-        // Memory
+        // Memory Instructions Updated to support labels (e.g., lw $t0, varName)
         case 'lw': {
-           const { offset, reg } = parseReg(args[1]);
-           const addr = getRegVal(reg) + offset;
-           nextRegs[parseReg(args[0])] = getMemWord(addr, nextMem);
+           if (labelMap.hasOwnProperty(args[1])) {
+             // Pseudo: lw $t0, label -> Load word at address of label
+             const addr = labelMap[args[1]];
+             nextRegs[parseReg(args[0])] = getMemWord(addr, nextMem);
+           } else {
+             const { offset, reg } = parseReg(args[1]);
+             const addr = getRegVal(reg) + offset;
+             nextRegs[parseReg(args[0])] = getMemWord(addr, nextMem);
+           }
            break;
         }
         case 'sw': {
-           const { offset, reg } = parseReg(args[1]);
-           const addr = getRegVal(reg) + offset;
-           nextMem = setMemWord(addr, getRegVal(parseReg(args[0])), nextMem);
+           if (labelMap.hasOwnProperty(args[1])) {
+             const addr = labelMap[args[1]];
+             nextMem = setMemWord(addr, getRegVal(parseReg(args[0])), nextMem);
+           } else {
+             const { offset, reg } = parseReg(args[1]);
+             const addr = getRegVal(reg) + offset;
+             nextMem = setMemWord(addr, getRegVal(parseReg(args[0])), nextMem);
+           }
            break;
         }
         case 'lb': {
-          const { offset, reg } = parseReg(args[1]);
-          const addr = getRegVal(reg) + offset;
-          let byte = getMemByte(addr, nextMem);
-          // Sign extension for lb
-          if (byte & 0x80) byte |= 0xFFFFFF00;
-          nextRegs[parseReg(args[0])] = byte;
-          break;
+           // We support lb $t0, label as well now
+           if (labelMap.hasOwnProperty(args[1])) {
+              const addr = labelMap[args[1]];
+              let byte = getMemByte(addr, nextMem);
+              if (byte & 0x80) byte |= 0xFFFFFF00;
+              nextRegs[parseReg(args[0])] = byte;
+           } else {
+              const { offset, reg } = parseReg(args[1]);
+              const addr = getRegVal(reg) + offset;
+              let byte = getMemByte(addr, nextMem);
+              if (byte & 0x80) byte |= 0xFFFFFF00;
+              nextRegs[parseReg(args[0])] = byte;
+           }
+           break;
         }
         case 'sb': {
-           const { offset, reg } = parseReg(args[1]);
-           const addr = getRegVal(reg) + offset;
-           nextMem = setMemByte(addr, getRegVal(parseReg(args[0])), nextMem);
+           if (labelMap.hasOwnProperty(args[1])) {
+              const addr = labelMap[args[1]];
+              nextMem = setMemByte(addr, getRegVal(parseReg(args[0])), nextMem);
+           } else {
+              const { offset, reg } = parseReg(args[1]);
+              const addr = getRegVal(reg) + offset;
+              nextMem = setMemByte(addr, getRegVal(parseReg(args[0])), nextMem);
+           }
            break;
         }
 
@@ -372,12 +406,9 @@ const useMipsSimulator = () => {
              }
              outputAppend = str;
            } else if (v0 === 5) { // read_int
-             // Pause is implied by prompt
              const input = window.prompt("Enter an integer:");
              const val = parseInt(input);
-             // Default to 0 if invalid, standard behavior for simple sims
              nextRegs[2] = isNaN(val) ? 0 : val; // Store in $v0
-             // Optional: Echo input to output to mimic terminal behavior
              outputAppend = nextRegs[2].toString() + "\n";
            } else if (v0 === 10) { // exit
              setIsRunning(false);
