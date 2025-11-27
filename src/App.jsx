@@ -18,71 +18,48 @@ const DATA_START = 0x10010000;
 const STACK_START = 0x7FFFFFFC;
 const TEXT_START = 0x00400000;
 
-const DEFAULT_CODE = `# MIPS Fibonacci Generator
-# Calculates the first N Fibonacci numbers
-
-.data
-msg_start: .asciiz "Fibonacci Sequence: "
-space:     .asciiz ", "
-newline:   .asciiz "\\n"
+// Default code updated to the user's subtraction example
+const DEFAULT_CODE = `.data
+msg1: .asciiz "Enter first number: "
+msg2: .asciiz "Enter second number: "
+res:  .asciiz "Difference = "
 
 .text
 main:
-    # Initialize variables
-    addi $t0, $zero, 10    # N = 10 (count)
-    addi $t1, $zero, 0     # a = 0
-    addi $t2, $zero, 1     # b = 1
-    
-    # Print start message
+    # Ask for first number
     li $v0, 4
-    la $a0, msg_start
+    la $a0, msg1
     syscall
-    
-    # Print first number (0)
+
+    # Read first integer
+    li $v0, 5
+    syscall
+    move $t0, $v0
+
+    # Ask for second number
+    li $v0, 4
+    la $a0, msg2
+    syscall
+
+    # Read second integer
+    li $v0, 5
+    syscall
+    move $t1, $v0
+
+    # Subtract: t2 = t0 - t1
+    sub $t2, $t0, $t1
+
+    # Print result label
+    li $v0, 4
+    la $a0, res
+    syscall
+
+    # Print difference
     li $v0, 1
-    add $a0, $zero, $t1
-    syscall
-    
-    # Print space
-    li $v0, 4
-    la $a0, space
+    move $a0, $t2
     syscall
 
-loop:
-    # Check if N <= 0
-    beq $t0, $zero, exit
-    
-    # Calculate next: c = a + b
-    add $t3, $t1, $t2
-    
-    # Move: a = b, b = c
-    add $t1, $zero, $t2
-    add $t2, $zero, $t3
-    
-    # Print current number (b)
-    li $v0, 1
-    add $a0, $zero, $t1
-    syscall
-    
-    # Decrement counter
-    addi $t0, $t0, -1
-    
-    # Print separator if not last
-    beq $t0, $zero, skip_comma
-    li $v0, 4
-    la $a0, space
-    syscall
-    
-skip_comma:
-    j loop
-
-exit:
-    # Print newline
-    li $v0, 4
-    la $a0, newline
-    syscall
-
-    # Exit program
+    # Exit
     li $v0, 10
     syscall
 `;
@@ -394,6 +371,14 @@ const useMipsSimulator = () => {
                loopGuard++;
              }
              outputAppend = str;
+           } else if (v0 === 5) { // read_int
+             // Pause is implied by prompt
+             const input = window.prompt("Enter an integer:");
+             const val = parseInt(input);
+             // Default to 0 if invalid, standard behavior for simple sims
+             nextRegs[2] = isNaN(val) ? 0 : val; // Store in $v0
+             // Optional: Echo input to output to mimic terminal behavior
+             outputAppend = nextRegs[2].toString() + "\n";
            } else if (v0 === 10) { // exit
              setIsRunning(false);
              nextPc = 0; // Terminate
